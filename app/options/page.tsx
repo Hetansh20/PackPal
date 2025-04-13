@@ -25,19 +25,8 @@ export default function OptionsPage() {
               whileTap={{ scale: 0.95 }}
             >
               <Package className="h-12 w-12 sm:h-16 sm:w-16 text-blue-600 mb-3 sm:mb-4" />
-              <h2 className="text-xl sm:text-2xl font-semibold mb-2 text-blue-800">Schedule Pickup</h2>
-              <p className="text-blue-700 text-sm sm:text-base">Arrange for your package to be collected</p>
-            </motion.div>
-          </Link>
-          <Link href="/track" className="block">
-            <motion.div
-              className="bg-gradient-to-br from-purple-100 to-purple-200 rounded-lg shadow-md p-6 sm:p-8 flex flex-col items-center text-center hover:shadow-lg transition duration-300"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-            >
-              <Search className="h-12 w-12 sm:h-16 sm:w-16 text-purple-600 mb-3 sm:mb-4" />
-              <h2 className="text-xl sm:text-2xl font-semibold mb-2 text-purple-800">Track Package</h2>
-              <p className="text-purple-700 text-sm sm:text-base">Check the status of your shipment</p>
+              <h2 className="text-xl sm:text-2xl font-semibold mb-2 text-blue-800">Create Checklist</h2>
+              <p className="text-blue-700 text-sm sm:text-base">Fill out items you want</p>
             </motion.div>
           </Link>
         </div>

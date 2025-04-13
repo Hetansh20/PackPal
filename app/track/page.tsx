@@ -1,70 +1,13 @@
-// 'use client';
-
-// import { useState } from 'react';
-
-// export default function WelcomePage() {
-//   const [startLocation, setStartLocation] = useState('');
-//   const [endLocation, setEndLocation] = useState('');
-//   const [mapHtml, setMapHtml] = useState<string | null>(null);
-//   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-
-//   const handleTrackRoute = async (e: React.FormEvent) => {
-//     e.preventDefault();
-//     setErrorMessage(null);
-//     setMapHtml(null);
-
-//     try {
-//       const response = await fetch('http://127.0.0.1:5000/calculate_route', {
-//         method: 'POST',
-//         headers: { 'Content-Type': 'application/json' },
-//         body: JSON.stringify({ start: startLocation, end: endLocation }),
-//       });
-
-//       const data = await response.json();
-//       if (!response.ok) {
-//         throw new Error(data.error || 'Failed to fetch route');
-//       }
-
-//       setMapHtml(data.map_html);
-//     } catch (error: any) {
-//       setErrorMessage(error.message);
-//     }
-//   };
-
-//   return (
-//     <div>
-//       <h1>Track Your Route</h1>
-//       <form onSubmit={handleTrackRoute}>
-//         <input
-//           type="text"
-//           placeholder="Start Location"
-//           value={startLocation}
-//           onChange={(e) => setStartLocation(e.target.value)}
-//         />
-//         <input
-//           type="text"
-//           placeholder="End Location"
-//           value={endLocation}
-//           onChange={(e) => setEndLocation(e.target.value)}
-//         />
-//         <button type="submit">Track Route</button>
-//       </form>
-//       {errorMessage && <p style={{ color: 'red' }}>{errorMessage}</p>}
-//       {mapHtml && <div dangerouslySetInnerHTML={{ __html: mapHtml }} />}
-//     </div>
-//   );
-// }
-
-
 'use client';
 
 import Link from 'next/link'
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Search } from 'lucide-react';
+import { ArrowLeft, Search, Map } from 'lucide-react';
 import TrackingTimeline from '../../components/TrackingTimeline';
 import Logo from '../../components/Logo';
 
+import SafeHTMLRenderer from "./safehtmlrender"
 export default function WelcomePage() {
   const [startLocation, setStartLocation] = useState('');
   const [endLocation, setEndLocation] = useState('');
@@ -74,30 +17,58 @@ export default function WelcomePage() {
   const [trackingData, setTrackingData] = useState<any>(null);
   const [liveStatus, setLiveStatus] = useState<string | null>('Fetching live updates...');
   const [statusUpdates, setStatusUpdates] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showFullscreenMap, setShowFullscreenMap] = useState(false);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
 
+  // Function to handle route tracking
   const handleTrackRoute = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setMapHtml(null);
-
+    setIsLoading(true);
+  
     try {
-      const response = await fetch('http://127.0.0.1:3000/calculate_route', {
+      // First get the route data
+      const response = await fetch('http://127.0.0.1:5000/calculate_route', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start: startLocation, end: endLocation }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          start: startLocation,
+          end: endLocation
+        }),
       });
-
-      const data = await response.json();
+  
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to fetch route');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch route');
       }
-
-      setMapHtml(data.map_html);
+  
+      // Then get the map HTML
+      const mapResponse = await fetch('http://127.0.0.1:5000/track', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          start: startLocation,
+          end: endLocation
+        }),
+      });
+  
+      const mapHtmlText = await mapResponse.text();
+      setMapHtml(mapHtmlText); // Store the entire HTML response
     } catch (error: any) {
       setErrorMessage(error.message);
+      console.error("Error fetching route:", error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
+  // Function to handle package tracking
   const handleTrackPackage = (e: React.FormEvent) => {
     e.preventDefault();
     setTrackingData({
@@ -117,8 +88,27 @@ export default function WelcomePage() {
     setLiveStatus('Fetching live updates...');
   };
 
+  // Effect to initialize map when mapHtml changes
   useEffect(() => {
-    let interval: NodeJS.Timer;
+    if (mapHtml && mapContainerRef.current) {
+      mapContainerRef.current.innerHTML = mapHtml;
+
+      // Extract and execute any scripts in the map HTML
+      const scriptMatch = mapHtml.match(/<script>([\s\S]*?)<\/script>/);
+      if (scriptMatch && scriptMatch[1]) {
+        try {
+          // Use Function constructor instead of eval for better scoping
+          new Function(scriptMatch[1])();
+        } catch (error) {
+          console.error("Error executing map script:", error);
+        }
+      }
+    }
+  }, [mapHtml]);
+
+  // Effect for status updates simulation
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
     if (trackingData) {
       interval = setInterval(() => {
         const updates = [
@@ -132,22 +122,28 @@ export default function WelcomePage() {
           if (prev.length < updates.length) {
             return [...prev, updates[prev.length]];
           } else {
-            clearInterval(interval);
+            if (interval) clearInterval(interval);
             setLiveStatus('All updates received');
             return prev;
           }
         });
       }, 3000);
     }
-
-    return () => clearInterval(interval);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [trackingData]);
+
+  // Toggle fullscreen map view
+  const toggleFullscreenMap = () => {
+    setShowFullscreenMap(!showFullscreenMap);
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-blue-50">
       {/* Responsive Header */}
       <header className="bg-blue-200/50 text-white py-4 px-4 sm:px-6 flex flex-col sm:flex-row justify-between items-center space-y-4 sm:space-y-0">
-      <Link href="/options" className="text-blue-600 hover:text-blue-800 transition-colors">
+        <Link href="/options" className="text-blue-600 hover:text-blue-800 transition-colors">
           <ArrowLeft className="h-6 w-6" />
         </Link>
         <h1 className="text-xl sm:text-2xl text-blue-600 font-bold">Track Your Details</h1>
@@ -176,18 +172,56 @@ export default function WelcomePage() {
               />
               <button
                 type="submit"
-                className="w-full sm:w-auto bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors"
+                disabled={isLoading}
+                className="w-full sm:w-auto bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors disabled:bg-blue-400"
               >
-                Track Route
+                {isLoading ? 'Loading...' : 'Track Route'}
               </button>
             </div>
           </form>
           {errorMessage && <p className="text-red-500 text-sm mb-4">{errorMessage}</p>}
-          {mapHtml && (
-            <div className="w-full overflow-hidden rounded-lg shadow-lg">
-              <div dangerouslySetInnerHTML={{ __html: mapHtml }} />
-            </div>
-          )}
+          
+          {/* Map Container */}
+          {/* In your main component's return statement*/}
+{mapHtml && (
+  <motion.div 
+    initial={{ opacity: 0, y: 20 }}
+    animate={{ opacity: 1, y: 0 }}
+    transition={{ duration: 0.5 }}
+    className="bg-white rounded-lg shadow-md overflow-hidden"
+  >
+    <div className="flex justify-between items-center p-4 bg-blue-50">
+      <h3 className="text-lg font-semibold text-blue-700">Route Map</h3>
+      <button 
+        onClick={toggleFullscreenMap}
+        className="text-blue-600 hover:text-blue-800 transition-colors"
+      >
+        {showFullscreenMap ? 'Exit Fullscreen' : 'View Fullscreen'}
+      </button>
+    </div>
+    
+    <div className={`${showFullscreenMap 
+      ? 'fixed inset-0 z-50 bg-white' 
+      : 'relative h-96 w-full'}`}
+    >
+      <SafeHTMLRenderer 
+        html={mapHtml} 
+        className="h-full w-full" 
+      />
+    </div>
+    
+    {showFullscreenMap && (
+      <div className="fixed top-4 right-4 z-50 bg-white rounded-lg shadow-md p-4">
+        <button 
+          onClick={toggleFullscreenMap}
+          className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors"
+        >
+          Exit Fullscreen
+        </button>
+      </div>
+    )}
+  </motion.div>
+)}
         </section>
 
         {/* Package Tracking Section */}

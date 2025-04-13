@@ -1,14 +1,14 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
+from flask import Flask, request, jsonify, render_template_string # type: ignore
+from flask_cors import CORS  # type: ignore # Import Flask-CORS
+import folium # type: ignore
+import aiohttp # type: ignore
 import asyncio
-import folium
-import aiohttp
 
-app = Flask(__name__)
-CORS(app)
+app = Flask(_name_)
+# Enable CORS for all routes
+CORS(app, resources={r"/": {"origins": ""}})
 
 TOMTOM_API_KEY = 'WPglpwBsq3RAlGQqJ8t4TkpRihGrspCI'
-OSRM_API_URL = 'http://router.project-osrm.org/route/v1/driving/'
 
 class RouteTracker:
     async def get_coordinates(self, place_name):
@@ -26,52 +26,28 @@ class RouteTracker:
                     }
                 return None
 
-    async def get_route_details(self, start_coords, end_coords, provider="tomtom"):
+    async def get_route_details(self, start_coords, end_coords):
         async with aiohttp.ClientSession() as session:
-            if provider == "tomtom":
-                return await self.get_tomtom_route(session, start_coords, end_coords)
-            elif provider == "osrm":
-                return await self.get_osrm_route(session, start_coords, end_coords)
-            return None
-
-    async def get_tomtom_route(self, session, start_coords, end_coords):
-        url = f"https://api.tomtom.com/routing/1/calculateRoute/{start_coords['lat']},{start_coords['lon']}:{end_coords['lat']},{end_coords['lon']}/json"
-        params = {
-            'key': TOMTOM_API_KEY,
-            'traffic': 'true',
-            'computeTravelTimeFor': 'all'
-        }
-        async with session.get(url, params=params) as response:
-            data = await response.json()
-            if not data.get("routes"):
-                return None
-
-            route = data["routes"][0]
-            return {
-                "segments": self._process_route_segments(route),
-                "summary": {
-                    "distance": route["summary"]["lengthInMeters"] / 1000,
-                    "time": route["summary"]["travelTimeInSeconds"] / 60,
-                    "traffic_delay": route["summary"].get("trafficDelayInSeconds", 0) / 60
-                }
+            url = f"https://api.tomtom.com/routing/1/calculateRoute/{start_coords['lat']},{start_coords['lon']}:{end_coords['lat']},{end_coords['lon']}/json"
+            params = {
+                'key': TOMTOM_API_KEY,
+                'traffic': 'true',
+                'computeTravelTimeFor': 'all'
             }
+            async with session.get(url, params=params) as response:
+                data = await response.json()
+                if not data.get("routes"):
+                    return None
 
-    async def get_osrm_route(self, session, start_coords, end_coords):
-        url = f"{OSRM_API_URL}{start_coords['lon']},{start_coords['lat']};{end_coords['lon']},{end_coords['lat']}"
-        params = {'overview': 'full', 'geometries': 'geojson'}
-        async with session.get(url, params=params) as response:
-            data = await response.json()
-            if not data.get("routes"):
-                return None
-
-            route = data["routes"][0]
-            return {
-                "segments": [{"start": start_coords, "end": end_coords}],
-                "summary": {
-                    "distance": route["distance"] / 1000,
-                    "time": route["duration"] / 60
+                route = data["routes"][0]
+                return {
+                    "segments": self._process_route_segments(route),
+                    "summary": {
+                        "distance": route["summary"]["lengthInMeters"] / 1000,
+                        "time": route["summary"]["travelTimeInSeconds"] / 60,
+                        "traffic_delay": route["summary"].get("trafficDelayInSeconds", 0) / 60
+                    }
                 }
-            }
 
     def _process_route_segments(self, route):
         segments = []
@@ -99,34 +75,82 @@ class RouteTracker:
         ).add_to(m)
         for segment in route_data["segments"]:
             folium.PolyLine([segment["start"], segment["end"]], color='blue', weight=4).add_to(m)
-        return m._repr_html_()
+        return m.repr_html()
 
 route_tracker = RouteTracker()
 
-@app.route("/api/track", methods=["POST"])
-async def track_route():
-    try:
-        data = request.get_json()
-        start_location = data.get("start")
-        end_location = data.get("end")
-        provider = data.get("provider", "tomtom")
+@app.route("/", methods=["GET"])
+def index():
+    return render_template_string('''
+        <h2>Route Tracker</h2>
+        <form method="post" action="/track">
+            Start Location: <input type="text" name="start" required><br>
+            End Location: <input type="text" name="end" required><br>
+            <input type="submit" value="Track">
+        </form>
+    ''')
 
-        start_info = await route_tracker.get_coordinates(start_location)
-        end_info = await route_tracker.get_coordinates(end_location)
+@app.route("/track", methods=["POST"])
+def track():
+    start_location = request.form.get("start")
+    end_location = request.form.get("end")
 
-        if not start_info or not end_info:
-            return jsonify({"error": "Could not geocode locations"}), 400
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    start_info = loop.run_until_complete(route_tracker.get_coordinates(start_location))
+    end_info = loop.run_until_complete(route_tracker.get_coordinates(end_location))
 
-        route_data = await route_tracker.get_route_details(start_info, end_info, provider)
-        if not route_data:
-            return jsonify({"error": "Could not calculate route"}), 400
+    if not start_info or not end_info:
+        return "Invalid location input"
 
-        map_html = route_tracker.generate_map(start_info, end_info, route_data)
+    route_data = loop.run_until_complete(route_tracker.get_route_details(start_info, end_info))
+    if not route_data:
+        return "Could not calculate route"
 
-        return jsonify({"map_html": map_html, "summary": route_data["summary"]})
+    map_html = route_tracker.generate_map(start_info, end_info, route_data)
+    print("this is my map_html working need to elaborate",map_html)
+    return render_template_string(f'''
+        <h2>Route from {start_info["address"]} to {end_info["address"]}</h2>
+        <p><strong>Distance:</strong> {route_data["summary"]["distance"]:.2f} km</p>
+        <p><strong>Time:</strong> {route_data["summary"]["time"]:.2f} min</p>
+        <p><strong>Traffic Delay:</strong> {route_data["summary"]["traffic_delay"]:.2f} min</p>
+        {map_html}
+        <br><a href="/">Track Another Route</a>
+    ''')
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+# Add a route for calculate_route if that's what your frontend is calling
+@app.route("/calculate_route", methods=["POST", "OPTIONS"])
+def calculate_route():
+    # Handle preflight OPTIONS request
+    if request.method == "OPTIONS":
+        response = jsonify({"status": "success"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "Content-Type")
+        response.headers.add("Access-Control-Allow-Methods", "POST")
+        return response
+        
+    # Handle actual POST request
+    data = request.json
+    start_location = data.get("start")
+    end_location = data.get("end")
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    start_info = loop.run_until_complete(route_tracker.get_coordinates(start_location))
+    end_info = loop.run_until_complete(route_tracker.get_coordinates(end_location))
+    
+    if not start_info or not end_info:
+        return jsonify({"error": "Invalid location input"})
+    
+    route_data = loop.run_until_complete(route_tracker.get_route_details(start_info, end_info))
+    if not route_data:
+        return jsonify({"error": "Could not calculate route"})
+    
+    return jsonify({
+        "start": start_info,
+        "end": end_info,
+        "route": route_data
+    })
 
-if __name__ == "__main__":
+if _name_ == "_main_":
     app.run(debug=True, port=5000)

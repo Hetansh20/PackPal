@@ -13,7 +13,6 @@ export default function PickupPage() {
   const transportModes = [
     { icon: Plane, name: 'Air', color: 'from-blue-100 to-blue-200' },
     { icon: Train, name: 'Train', color: 'from-purple-100 to-purple-200' },
-    { icon: Ship, name: 'Ship', color: 'from-indigo-100 to-indigo-200' },
     { icon: Truck, name: 'Road', color: 'from-pink-100 to-pink-200' },
   ]
 
